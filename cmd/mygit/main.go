@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"compress/zlib"
+	"crypto/sha1"
 	"fmt"
 	"io"
 	"os"
@@ -49,6 +50,61 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Fprintf(os.Stdout, "%s", string(data))
+	
+	case "hash-object":
+		var filePath string
+		writeToFile := false
+		if len(os.Args) == 4 {
+			if os.Args[2] != "-w" {
+				os.Exit(1)
+			}
+			writeToFile = true
+			filePath = os.Args[3]
+		} else if len(os.Args) == 3 {
+			filePath = os.Args[2]
+		} else {
+			os.Exit(1)
+		}
+
+		fileBytes, err := os.ReadFile(filePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading the file: %s\n", err)
+			os.Exit(1)
+		}
+
+		leading := []byte(fmt.Sprintf("blob %d%c", len(fileBytes), 0))
+		blob := append(leading, fileBytes...)
+
+		// hash
+		hasher := sha1.New()
+		hasher.Write(blob)
+		hash := fmt.Sprintf("%x", hasher.Sum(nil))
+
+		if writeToFile {
+			// compress and write
+			dir := hash[:2]
+			file := hash[2:]
+
+			dirPath := fmt.Sprintf(".git/objects/%s", dir)
+			fileToWritePath := fmt.Sprintf("%s/%s", dirPath, file)
+
+			if err := os.MkdirAll(dirPath, 0755); err != nil {
+				fmt.Fprintf(os.Stderr, "Error creating directory: %s\n", err)
+				os.Exit(1)
+			}
+
+			fileWriter, err := os.Create(fileToWritePath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error creating file: %s\n", err)
+				os.Exit(1)
+			}
+
+			compresser := zlib.NewWriter(fileWriter)
+			compresser.Write(blob)
+			compresser.Close()
+		}
+
+		fmt.Fprintf(os.Stdout, "%s", hash)
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
